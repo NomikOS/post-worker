@@ -1,0 +1,78 @@
+steps:
+  - name: gcr.io/kaniko-project/executor:v0.17.1
+    id: build
+    env:
+      - NODE_ENV=$_ENV
+      - DB_HOST=$_DB_HOST
+      - PROJECT_ID=$PROJECT_ID
+    args:
+      - --destination=gcr.io/$PROJECT_ID/$_ENV-post-worker:latest
+      - --destination=gcr.io/$PROJECT_ID/$_ENV-post-worker:$BUILD_ID
+      - --cache=true
+      - --cache-ttl=168h
+      - --target=deployment-image
+      - --build-arg=NODE_ENV
+      - --build-arg=PROJECT_ID
+      - --build-arg=DB_HOST
+      - --build-arg=GOOGLE_APPLICATION_CREDENTIALS="/app/service-account.json"
+
+  # Template es global
+  - name: gcr.io/cloud-builders/gcloud
+    id: create-instance-template
+    args:
+      - compute
+      - instance-templates
+      - create-with-container
+      - $_ENV-post-worker-$BUILD_ID
+      - --machine-type=e2-micro
+      - --boot-disk-size=10GB
+      - --boot-disk-type=pd-balanced
+      - --shielded-vtpm
+      - --shielded-integrity-monitoring
+      - --container-restart-policy=always
+      #  update
+      - --network=ia-vpc
+      #  update
+      - --subnet=ia-vpc-us-east1-1
+      - --region=us-east1
+      - --container-image=gcr.io/$PROJECT_ID/$_ENV-post-worker:$BUILD_ID
+      # - --service-account=post-worker-mig@incidentes-aislados.iam.gserviceaccount.com
+      # - --scopes=cloud-platform
+
+  # - name: gcr.io/cloud-builders/gcloud
+  #   id: wait-until-stable
+  #   args:
+  #     - compute
+  #     - instance-groups
+  #     - managed
+  #     - wait-until
+  #     - $_ENV-post-worker
+  #     - --region=us-east1
+  #     - --stable
+
+  # Mig es zonal
+  - name: gcr.io/cloud-builders/gcloud
+    id: rolling-action-start-update
+    args:
+      - compute
+      - instance-groups
+      - managed
+      - rolling-action
+      - start-update
+      - $_ENV-post-worker
+      - --version=template=$_ENV-post-worker-$BUILD_ID
+      - --zone=us-east1-b
+      - --max-unavailable=0
+
+  # - name: gcr.io/cloud-builders/gcloud
+  #   id: delete-instance-template
+  #   args:
+  #     - compute
+  #     - instance-templates
+  #     - delete
+  #     - $_ENV-post-worker
+  #     - --quiet
+
+timeout: 300s
+tags:
+  - post-worker
